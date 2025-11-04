@@ -1,256 +1,313 @@
 # BUT: préparer les données (nettoyer/trier...) et finir avec un unique .csv complet
 
 import pandas as pd
+import numpy as np
 import warnings
-import sys # Importé pour pouvoir arrêter le script en cas d'erreur fatale
+import os
 
-# A FAIRE: 1) envoyer les données dans dossier data/ dans le local git (gitignore va les ignorer et ne pas les envoyer sur le repo Git)
-# 2) ouvrir chaque .csv, vérifier les noms des colonnes dans les vrais fichiers data
-# 3) remplir le dictionnaire COLS avec les noms de colonnes corrects
-# 4) vérifier les PATHS
+# --- 1. CONFIGURATION : MODIFIEZ CES CHEMINS ---
+# (J'ai mis à jour les noms pour correspondre à vos messages d'erreur)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
-# ---  PARAMÈTRES GLOBAUX ---
+# Fichiers Élections
+PATH_ELEC_2014 = os.path.join(DATA_DIR, "elections_2014.txt")
+PATH_ELEC_2020 = os.path.join(DATA_DIR, "elections_2020.txt") 
 
-# Seuil de population pour garder une commune
-SEUIL_POPULATION = 3500
+# Fichiers de données INSEE
+PATH_POP_2014 = os.path.join(DATA_DIR, "population_2014.xls")
+PATH_POP_2020 = os.path.join(DATA_DIR, "population_2020.csv")
+PATH_DIPLOME_2014 = os.path.join(DATA_DIR, "diplome_2014.xls")
+PATH_DIPLOME_2020 = os.path.join(DATA_DIR, "diplome_2020.csv") # <-- MODIFIÉ (correspond à votre erreur)
+PATH_REVENU_2019 = os.path.join(DATA_DIR, "revenu_2019.csv") # <-- MODIFIÉ (correspond à votre erreur)
 
-# Définition des blocs politiques (listes des nuances à agréger)
-BLOC_VERT_2020 = ['LUG', 'LECO', 'LDVG']
-BLOC_GAUCHE_2014 = ['LUG', 'LSOC', 'LDVG'] # À vérifier selon les nuances de 2014
+# Clé de jointure principale (Code Commune INSEE)
+JOIN_KEY = 'COM'
 
-# Mettre ici les vrais noms de fichiers data
-PATHS = {
-    'elec_2020': 'data/elections_municipales_2020.csv',
-    'elec_2014': 'data/elections_municipales_2014.csv',
-    'pop_2019': 'data/DS_RP_POPULATION_COMP_2019.csv',
-    'pop_2013': 'data/DS_RP_POPULATION_COMP_2013.csv',
-    'diplo_2019': 'data/DS_RP_DIPLOMES_PRINC_2019.csv',
-    'diplo_2013': 'data/DS_RP_DIPLOMES_PRINC_2013.csv',
-    'filo_2019': 'data/DS_FILOSOFI_CC_2019.csv',
-    'filo_2013': 'data/DS_FILOSOFI_CC_2013.csv'
-}
+# --- 2. DÉFINITION DES VARIABLES ET NUANCES ---
+# (Nous devrons peut-être ajuster ces noms après le prochain test)
 
-# Mettre ici les vrais noms des colonnes dans les fichiers
-COLS = {
-    'code_insee': 'CODGEO',      # Nom de la colonne pour le code INSEE (commune)
-    'code_dept': 'Code du département', # Nom de la colonne pour le code département
-    'niv_geo': 'NIVGEO',         # Nom de la colonne de niveau géographique (ex: 'COM')
-    'pop_totale': 'P19_POP',      # Nom de la colonne population totale (Recensement)
-    'pop_cadres': 'P19_CADRE',    # Nom de la colonne pour le nombre de cadres
-    'pop_diplomes': 'P19_DIPL_SUP', # Nom de la colonne pour le nombre de diplômés du sup
-    'revenu_median': 'MED19',      # Nom de la colonne pour le revenu médian (Filosofi)
-    'elec_pop': 'Population',    # Nom de la colonne population (fichier élections)
-    'elec_nuance': 'Nuance Liste', # Nom de la colonne nuance (fichier élections)
-    'elec_voix': 'Voix',         # Nom de la colonne voix (fichier élections)
-    'elec_exprimes': 'Exprimés'  # Nom de la colonne exprimés (fichier élections)
-}
+# Variables Population & Cadres
+VAR_POP_2014 = 'P14_POP'
+VAR_CADRES_NUM_2014 = 'C14_POP15P_CS3'
+VAR_CADRES_DEN_2014 = 'C14_POP15P'
+VAR_POP_2020 = 'P20_POP'
+VAR_CADRES_NUM_2020 = 'C20_POP15P_CS3'
+VAR_CADRES_DEN_2020 = 'C20_POP15P'
 
-# ---  FONCTIONS DE NETTOYAGE ROBUSTES ---
+# Variables Diplôme
+VAR_DIPLOME_NUM_2014 = 'P09_NSCOL15P_SUP' # <-- À VÉRIFIER
+VAR_DIPLOME_DEN_2014 = VAR_CADRES_DEN_2014 
+VAR_DIPLOME_NUM_2020 = 'P20_NSCOL15P_SUP5' # <-- À VÉRIFIER
+VAR_DIPLOME_DEN_2020 = VAR_CADRES_DEN_2020 
 
-def safe_read_csv(path):
-    """
-    Tente de lire un CSV avec les configurations françaises les plus probables.
-    Gère les erreurs d'encodage et de séparateur.
-    """
+# Variable Revenu
+VAR_REVENU_MEDIAN_2019 = 'MED19' # <-- À VÉRIFIER
+VAR_CODE_COMMUNE_REVENU = 'CODGEO' # <-- À VÉRIFIER
+
+# Listes de nuances politiques pour l'agrégation
+VARS_VOTE_2014_LIST = [
+    'LEXG', 'LFG', 'LCOM', 'LPG', 'LSOC', 'LRDG', 'LDVG', 'LUG'
+] 
+VARS_VOTE_2020_LIST = [
+    'LEXG', 'LCOM', 'LFI', 'LSOC', 'LRDG', 'LDVG', 'LUG', 'LVEC', 'LECO'
+] 
+
+# --- 3. FONCTIONS DE CHARGEMENT ET TRAITEMENT ---
+
+def safe_read_excel(path, skiprows=5):
+    """Charge un fichier Excel INSEE en ignorant les 5 premières lignes."""
     try:
-        # Essai n°1 (le plus probable pour l'INSEE)
-        return pd.read_csv(path, sep=';', dtype={COLS['code_insee']: str}, encoding='latin1')
-    except UnicodeDecodeError:
-        print(f"Alerte (non bloquant) sur {path}: latin1 a échoué, essai avec utf-8...")
-        try:
-            # Essai n°2 (standard)
-            return pd.read_csv(path, sep=';', dtype={COLS['code_insee']: str}, encoding='utf-8')
-        except Exception as e_utf8:
-            print(f"ERREUR FATALE: Impossible de lire le fichier '{path}' avec encodage utf-8. Erreur: {e_utf8}")
-            sys.exit() # Arrête le script
-    except FileNotFoundError:
-        print(f"ERREUR FATALE: Le fichier '{path}' n'a pas été trouvé.")
-        print("Vérifiez le dictionnaire 'PATHS' et que le fichier est dans le dossier 'data/'.")
-        sys.exit() # Arrête le script
+        return pd.read_excel(path, skiprows=skiprows)
     except Exception as e:
-        print(f"ERREUR FATALE: Problème inconnu lors de la lecture de '{path}'. Erreur: {e}")
-        sys.exit() # Arrête le script
+        print(f"ERREUR: Impossible de lire le fichier Excel {path}. Vérifiez le chemin et le format. Erreur: {e}")
+        return None
 
-def clean_departement(df):
-    # Nettoie les codes départements, garde seulement FFrance métropolitaine
-    print("Nettoyage des codes départements...")
-    if COLS['code_dept'] not in df.columns:
-        print(f"Alerte: Colonne '{COLS['code_dept']}' non trouvée. Nettoyage département sauté.")
-        return df
+def safe_read_csv(path, sep=';', skiprows=5, encoding='latin1'):
+    """Charge un fichier CSV INSEE en ignorant les 5 premières lignes."""
+    try:
+        return pd.read_csv(path, sep=sep, skiprows=skiprows, encoding=encoding, low_memory=False)
+    except Exception as e:
+        print(f"ERREUR: Impossible de lire le fichier CSV {path}. (sep='{sep}', encoding='{encoding}'). Erreur: {e}")
+        return None
+
+def load_and_prep_elections_2014(path):
+    """Charge et nettoie le fichier électoral 2014 (mal formaté)."""
+    print("Chargement Élections 2014...")
+    try:
+        df = pd.read_csv(path, sep=';', encoding='latin1', low_memory=False,
+                         dtype={'Code du département': str, 'Code de la commune': str},
+                         engine='python') # <-- MODIFIÉ (Solution Erreur 1)
+    except Exception as e:
+        print(f"ERREUR: Impossible de lire {path}. Assurez-vous qu'il est au format 'txt' avec séparateur ';'. Erreur: {e}")
+        return None
+
+    # ... (le reste de la fonction est inchangé) ...
+    df[JOIN_KEY] = df['Code du département'].str.zfill(2) + df['Code de la commune'].str.zfill(3)
+    df['Voix'] = pd.to_numeric(df['Voix'], errors='coerce').fillna(0)
+    df['Exprimés'] = pd.to_numeric(df['Exprimés'], errors='coerce')
+    df_votes = df[df['Code Nuance'].isin(VARS_VOTE_2014_LIST)]
+    df_agg_votes = df_votes.groupby(JOIN_KEY)['Voix'].sum().reset_index(name='Total_Votes_2014')
+    df_agg_exp = df.groupby(JOIN_KEY)['Exprimés'].first().reset_index(name='Total_Exprimés_2014')
+    df_elec_2014 = pd.merge(df_agg_votes, df_agg_exp, on=JOIN_KEY, how='left')
+    df_elec_2014['Vote_Share_2014'] = df_elec_2014['Total_Votes_2014'] / df_elec_2014['Total_Exprimés_2014']
+    
+    return df_elec_2014[[JOIN_KEY, 'Vote_Share_2014']]
+
+def load_and_prep_elections_2020(path):
+    """Charge et nettoie le fichier électoral 2020 (format large)."""
+    print("Chargement Élections 2020...")
+    try:
+        df = pd.read_csv(path, sep='\t', encoding='latin1', low_memory=False, # <-- MODIFIÉ (Solution Erreur 2)
+                         dtype={'Code du département': str, 'Code de la commune': str})
+    except Exception as e:
+        print(f"ERREUR: Impossible de lire {path}. Assurez-vous qu'il est au format 'txt' avec séparateur TAB. Erreur: {e}")
+        return None
+
+    # ... (le reste de la fonction est inchangé) ...
+    df.rename(columns={
+        'Code du département': 'Code_dep_2digit',
+        'Code de la commune': 'Code_commune_3digit'
+    }, inplace=True)
+    df['Code_dep_2digit'] = df['Code_dep_2digit'].astype(str).str.pad(width=2, side='left', fillchar='0')
+    df['Code_commune_3digit'] = df['Code_commune_3digit'].astype(str).str.zfill(3)
+    df[JOIN_KEY] = df['Code_dep_2digit'] + df['Code_commune_3digit']
+    df['Exprimés'] = pd.to_numeric(df['Exprimés'], errors='coerce')
+    df_exp = df.groupby(JOIN_KEY)['Exprimés'].first().reset_index(name='Total_Exprimés_2020')
+    all_data_long = []
+    base_cols = [JOIN_KEY]
+    try:
+        df_base = df[base_cols + ['Code Nuance', 'Voix']].rename(columns={'Code Nuance': 'Nuance', 'Voix': 'Voix'})
+        all_data_long.append(df_base)
+    except KeyError:
+        print("Avertissement: Colonnes 'Code Nuance' ou 'Voix' de base non trouvées.")
+    i = 1
+    while f'Code Nuance.{i}' in df.columns:
+        nuance_col = f'Code Nuance.{i}'
+        voix_col = f'Voix.{i}'
+        if voix_col not in df.columns:
+            break
+        df_part = df[base_cols + [nuance_col, voix_col]].rename(columns={nuance_col: 'Nuance', voix_col: 'Voix'})
+        all_data_long.append(df_part)
+        i += 1
+    if not all_data_long:
+        print("ERREUR: Impossible de trouver des colonnes de nuances/voix dans le fichier 2020.")
+        return None
+    df_long = pd.concat(all_data_long, ignore_index=True)
+    df_long.dropna(subset=['Nuance', 'Voix'], inplace=True)
+    df_long['Voix'] = pd.to_numeric(df_long['Voix'], errors='coerce').fillna(0)
+    df_votes = df_long[df_long['Nuance'].isin(VARS_VOTE_2020_LIST)]
+    df_agg_votes = df_votes.groupby(JOIN_KEY)['Voix'].sum().reset_index(name='Total_Votes_2020')
+    df_elec_2020 = pd.merge(df_agg_votes, df_exp, on=JOIN_KEY, how='left')
+    df_elec_2020['Vote_Share_2020'] = df_elec_2020['Total_Votes_2020'] / df_elec_2020['Total_Exprimés_2020']
+    
+    return df_elec_2020[[JOIN_KEY, 'Vote_Share_2020']]
+
+def load_data_2014(path_pop, path_diplome):
+    """Charge et fusionne les données de Population et Diplôme 2014."""
+    print("Chargement Données 2014 (Pop + Diplôme)...")
+    pop_2014 = safe_read_excel(path_pop, skiprows=5)
+    dipl_2014 = safe_read_excel(path_diplome, skiprows=5)
+    
+    if pop_2014 is None or dipl_2014 is None:
+        return None
+
+    # <-- MODIFIÉ (Solution Erreur 4 - Debug)
+    print("--- DEBUG DIPLOME 2014 ---")
+    print(f"Colonnes trouvées dans {path_diplome}: \n{dipl_2014.columns.to_list()}\n")
+    print("--- FIN DEBUG ---")
+
+    pop_2014.rename(columns={'COM': JOIN_KEY}, inplace=True)
+    dipl_2014.rename(columns={'CODGEO': JOIN_KEY}, inplace=True)
+    pop_2014[JOIN_KEY] = pop_2014[JOIN_KEY].astype(str)
+    dipl_2014[JOIN_KEY] = dipl_2014[JOIN_KEY].astype(str)
+    pop_cols = [JOIN_KEY, VAR_POP_2014, VAR_CADRES_NUM_2014, VAR_CADRES_DEN_2014]
+    dipl_cols = [JOIN_KEY, VAR_DIPLOME_NUM_2014]
+    for df, cols, name in [(pop_2014, pop_cols, "Pop 2014"), (dipl_2014, dipl_cols, "Diplôme 2014")]:
+        for col in cols:
+            if col not in df.columns:
+                print(f"ERREUR: Colonne '{col}' non trouvée dans {name}. Vérifiez la section 'DÉFINITION DES VARIABLES'.")
+                return None
+    
+    pop_2014 = pop_2014[pop_cols]
+    dipl_2014 = dipl_2014[dipl_cols]
+    data_2014 = pd.merge(pop_2014, dipl_2014, on=JOIN_KEY, how='inner')
+    data_2014['Part_Cadres_2014'] = data_2014[VAR_CADRES_NUM_2014] / data_2014[VAR_CADRES_DEN_2014]
+    data_2014['Part_Diplomes_2014'] = data_2014[VAR_DIPLOME_NUM_2014] / data_2014[VAR_CADRES_DEN_2014]
+    
+    return data_2014[[JOIN_KEY, VAR_POP_2014, 'Part_Cadres_2014', 'Part_Diplomes_2014']]
+
+def load_data_2020(path_pop, path_diplome):
+    """Charge et fusionne les données de Population et Diplôme 2020."""
+    print("Chargement Données 2020 (Pop + Diplôme)...")
+    
+    pop_2020 = safe_read_csv(path_pop, sep=';', skiprows=5, encoding='latin1')
+    # <-- MODIFIÉ (Solution Erreur 3)
+    dipl_2020 = safe_read_csv(path_diplome, sep=';', skiprows=5, encoding='latin1') 
+    
+    if pop_2020 is None or dipl_2020 is None:
+        return None
+
+    # <-- MODIFIÉ (Debug)
+    print("--- DEBUG DIPLOME 2020 ---")
+    print(f"Colonnes trouvées dans {path_diplome}: \n{dipl_2020.columns.to_list()}\n")
+    print("--- FIN DEBUG ---")
+
+    pop_2020.rename(columns={'COM': JOIN_KEY}, inplace=True)
+    dipl_2020.rename(columns={'CODGEO': JOIN_KEY}, inplace=True)
+    pop_2020[JOIN_KEY] = pop_2020[JOIN_KEY].astype(str)
+    dipl_2020[JOIN_KEY] = dipl_2020[JOIN_KEY].astype(str)
+    pop_cols = [JOIN_KEY, VAR_POP_2020, VAR_CADRES_NUM_2020, VAR_CADRES_DEN_2020]
+    dipl_cols = [JOIN_KEY, VAR_DIPLOME_NUM_2020]
+    for df, cols, name in [(pop_2020, pop_cols, "Pop 2020"), (dipl_2020, dipl_cols, "Diplôme 2020")]:
+        for col in cols:
+            if col not in df.columns:
+                print(f"ERREUR: Colonne '{col}' non trouvée dans {name}. Vérifiez la section 'DÉFINITION DES VARIABLES'.")
+                return None
+                
+    pop_2020 = pop_2020[pop_cols]
+    dipl_2020 = dipl_2020[dipl_cols]
+    data_2020 = pd.merge(pop_2020, dipl_2020, on=JOIN_KEY, how='inner')
+    data_2020['Part_Cadres_2020'] = data_2020[VAR_CADRES_NUM_2020] / data_2020[VAR_CADRES_DEN_2020]
+    data_2020['Part_Diplomes_2020'] = data_2020[VAR_DIPLOME_NUM_2020] / data_2020[VAR_CADRES_DEN_2020]
+    
+    return data_2020[[JOIN_KEY, VAR_POP_2020, 'Part_Cadres_2020', 'Part_Diplomes_2020']]
+
+def load_revenu(path_revenu):
+    """Charge le revenu médian 2019."""
+    print("Chargement Revenu 2019...")
+    revenu_2019 = safe_read_csv(path_revenu, sep=';', skiprows=5, encoding='latin1')
+    
+    if revenu_2019 is None:
+        return None
+
+    # <-- MODIFIÉ (Solution Erreur 5 - Debug)
+    print("--- DEBUG REVENU 2019 ---")
+    print(f"Colonnes trouvées dans {path_revenu}: \n{revenu_2019.columns.to_list()}\n")
+    print("--- FIN DEBUG ---")
         
-    # ??? -> C'est la bonne méthode pour gérer la Corse ('2A', '2B')
-    df[COLS['code_dept']] = df[COLS['code_dept']].astype(str).replace('2A', '201T')
-    df[COLS['code_dept']] = df[COLS['code_dept']].replace('2B', '202T')
-    df[COLS['code_dept']] = pd.to_numeric(df[COLS['code_dept']].str.replace('T', ''), errors='coerce').astype('Int64')
-    df = df.dropna(subset=[COLS['code_dept']])
-    # exclure DROM > 900 
-    df = df[df[COLS['code_dept']] < 900]
-    return df
+    if VAR_CODE_COMMUNE_REVENU not in revenu_2019.columns or VAR_REVENU_MEDIAN_2019 not in revenu_2019.columns:
+        print(f"ERREUR: Colonnes '{VAR_CODE_COMMUNE_REVENU}' ou '{VAR_REVENU_MEDIAN_2019}' non trouvées dans {path_revenu}. Vérifiez la section 'DÉFINITION DES VARIABLES'.")
+        return None
 
-def load_elections(path, year, nuances_bloc):
-    #charge données électorales, filtre et agrège les blocs politiques
-    print(f"Chargement des élections {year}...")
+    revenu_2019.rename(columns={VAR_CODE_COMMUNE_REVENU: JOIN_KEY}, inplace=True)
+    revenu_2019[JOIN_KEY] = revenu_2019[JOIN_KEY].astype(str)
+    revenu_2019['Revenu_Median_2019'] = pd.to_numeric(revenu_2019[VAR_REVENU_MEDIAN_2019], errors='coerce')
     
-    # Utilise la fonction de lecture "blindée"
-    df = safe_read_csv(path) 
-    
-    # Nettoyage et filtre
-    df = clean_departement(df)
-    
-    # *** BLINDAGE : Conversion en numérique avant de filtrer ***
-    df[COLS['elec_pop']] = pd.to_numeric(df[COLS['elec_pop']], errors='coerce')
-    df = df.dropna(subset=[COLS['elec_pop']]) # Enlève les pop non valides
-    
-    df = df[df[COLS['elec_pop']] >= SEUIL_POPULATION]
+    return revenu_2019[[JOIN_KEY, 'Revenu_Median_2019']]
 
-    # *** BLINDAGE : Conversion en numérique des colonnes de vote ***
-    df[COLS['elec_voix']] = pd.to_numeric(df[COLS['elec_voix']], errors='coerce').fillna(0)
-    df[COLS['elec_exprimes']] = pd.to_numeric(df[COLS['elec_exprimes']], errors='coerce').fillna(0)
-
-    # Agrégation des scores
-    commune_group = df.groupby(COLS['code_insee'])
-    voix_bloc = commune_group.apply(lambda x: x[x[COLS['elec_nuance']].isin(nuances_bloc)][COLS['elec_voix']].sum())
-    voix_totales = commune_group[COLS['elec_exprimes']].sum()
-    
-    # Éviter les divisions par zéro si une commune n'a pas d'exprimés
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        # *** BLINDAGE : .replace(0, pd.NA) gère la division par zéro ***
-        score_bloc = (voix_bloc / voix_totales.replace(0, pd.NA)) * 100
-    
-    df_agg = pd.DataFrame({
-        f'Score_Bloc_{year}': score_bloc.fillna(0) # Mettre 0 si pas de voix ou 0 exprimés
-    }).reset_index()
-    
-    print(f"-> Fichier élections {year} chargé. {len(df_agg)} communes retenues.")
-    return df_agg
-
-def load_census(path, year, var_col_name, pop_col_name, new_name):
-    """Charge les données du Recensement (Cadres ou Diplômés)."""
-    print(f"Chargement Recensement {year} ({new_name})...")
-    
-    # Utilise la fonction de lecture "blindée"
-    df = safe_read_csv(path)
-    
-    # On garde que le niveau communal
-    df = df[df[COLS['niv_geo']] == 'COM']
-    
-    # *** BLINDAGE : Conversion en numérique avant calcul ***
-    var_col = pd.to_numeric(df[var_col_name], errors='coerce')
-    pop_col = pd.to_numeric(df[pop_col_name], errors='coerce')
-
-    # *** BLINDAGE : Gère la division par zéro ***
-    df[new_name] = (var_col / pop_col.replace(0, pd.NA)) * 100
-    
-    df = df[[COLS['code_insee'], new_name]]
-    return df
-
-def load_filosofi(path, year, var_col_name, new_name):
-    # charges données revenu FILOSOFI
-    print(f"Chargement FILOSOFI {year} ({new_name})...")
-    
-    # Utilise la fonction de lecture "blindée"
-    df = safe_read_csv(path)
-    
-    # On garde que le niveau communal
-    df = df[df[COLS['niv_geo']] == 'COM']
-    
-    # *** BLINDAGE : Gère les virgules françaises pour les décimales ***
-    var_col = df[var_col_name]
-    if var_col.dtype == 'object':
-        print(f"  > Détection de texte dans {new_name}, conversion de ',' en '.'...")
-        var_col = var_col.str.replace(',', '.', regex=False)
-        
-    df[new_name] = pd.to_numeric(var_col, errors='coerce')
-    
-    df = df[[COLS['code_insee'], new_name]]
-    return df
-
-# ---  FONCTION PRINCIPALE ---
-# (exécute tout)
+# --- 4. SCRIPT PRINCIPAL ---
 
 def main():
-    # Chargement fusion et création des variables (deltas)
-    print("--- Démarrage du pipeline de préparation des données ---")
+    warnings.simplefilter(action='ignore', category=FutureWarning)
+    warnings.simplefilter(action='ignore', category=pd.errors.DtypeWarning)
 
-    # --- ÉTAPE 1 : CHARGEMENT DE TOUTES LES BRIQUES ---
+    print("--- DÉBUT DE LA PRÉPARATION DES DONNÉES (V3) ---")
     
-    # Élections
-    df_elec_2020 = load_elections(PATHS['elec_2020'], 2020, BLOC_VERT_2020)
-    df_elec_2014 = load_elections(PATHS['elec_2014'], 2014, BLOC_GAUCHE_2014)
-
-    # Recensement - Cadres (PCS)
-    df_cadres_2019 = load_census(PATHS['pop_2019'], 2019, COLS['pop_cadres'], COLS['pop_totale'], 'Part_Cadres_2019')
-    df_cadres_2013 = load_census(PATHS['pop_2013'], 2013, COLS['pop_cadres'], COLS['pop_totale'], 'Part_Cadres_2013')
+    # Charger toutes les sources de données
+    df_elec_2014 = load_and_prep_elections_2014(PATH_ELEC_2014)
+    df_elec_2020 = load_and_prep_elections_2020(PATH_ELEC_2020)
+    df_data_2014 = load_data_2014(PATH_POP_2014, PATH_DIPLOME_2014)
+    df_data_2020 = load_data_2020(PATH_POP_2020, PATH_DIPLOME_2020)
+    df_revenu = load_revenu(PATH_REVENU_2019)
     
-    # Recensement - Diplômes
-    df_diplo_2019 = load_census(PATHS['diplo_2019'], 2019, COLS['pop_diplomes'], COLS['pop_totale'], 'Part_Diplomes_2019')
-    df_diplo_2013 = load_census(PATHS['diplo_2013'], 2013, COLS['pop_diplomes'], COLS['pop_totale'], 'Part_Diplomes_2013')
+    if any(df is None for df in [df_elec_2014, df_elec_2020, df_data_2014, df_data_2020, df_revenu]):
+        print("\n--- ERREUR ---")
+        print("Un ou plusieurs fichiers n'ont pas pu être chargés. Veuillez vérifier les messages d'erreur ci-dessus.")
+        print("Si l'erreur est 'Colonne ... non trouvée', lisez les listes de colonnes 'DEBUG' pour trouver le bon nom.")
+        print("Le script est arrêté.")
+        return
 
-    # Revenus - Filosofi
-    df_filo_2019 = load_filosofi(PATHS['filo_2019'], 2019, COLS['revenu_median'], 'Revenu_Median_2019')
-    df_filo_2013 = load_filosofi(PATHS['filo_2013'], 2013, COLS['revenu_median'], 'Revenu_Median_2013')
-
-    # --- ÉTAPE 2 : FUSION ---
-    print("Fusion de toutes les sources de données...")
+    print("\nFichiers chargés. Fusion en cours...")
     
-    # On rassemble toutes les briques dans une liste
-    dfs_to_merge = {
-        'elec_2014': df_elec_2014,
-        'cadres_2019': df_cadres_2019,
-        'cadres_2013': df_cadres_2013,
-        'diplo_2019': df_diplo_2019,
-        'diplo_2013': df_diplo_2013,
-        'filo_2019': df_filo_2019,
-        'filo_2013': df_filo_2013
-    }
-
-    # On part de la brique 2020 et on fusionne tout le reste
-    master_df = df_elec_2020
-    print(f"Shape de base (elec 2020): {master_df.shape}")
-
-    # *** BLINDAGE : Ajout de logging après chaque fusion ***
-    for name, df_to_merge in dfs_to_merge.items():
-        master_df = pd.merge(master_df, df_to_merge, on=COLS['code_insee'], how='inner')
-        print(f"  > Après fusion avec '{name}', shape: {master_df.shape}")
-        if master_df.empty:
-            print(f"ERREUR FATALE: La fusion avec '{name}' a produit un DataFrame vide.")
-            print(f"  Vérifiez que la colonne '{COLS['code_insee']}' est au bon format (str) et existe dans tous les fichiers.")
-            sys.exit()
-
-    print(f"Fusion terminée. {len(master_df)} communes sont complètes dans tous les datasets.")
-
-    # --- ÉTAPE 3 : CALCUL DES "DELTAS" (Le Choc) ---
-    print("Calcul des variables 'Delta' (Choc de gentrification)...")
+    # ... (le reste du script est inchangé) ...
+    df_elec = pd.merge(df_elec_2014, df_elec_2020, on=JOIN_KEY, how='inner')
+    df_data = pd.merge(df_data_2014, df_data_2020, on=JOIN_KEY, how='inner')
+    final_df = pd.merge(df_data, df_elec, on=JOIN_KEY, how='inner')
+    final_df = pd.merge(final_df, df_revenu, on=JOIN_KEY, how='inner')
     
-    master_df['Delta_Cadres'] = master_df['Part_Cadres_2019'] - master_df['Part_Cadres_2013']
-    master_df['Delta_Diplomes'] = master_df['Part_Diplomes_2019'] - master_df['Part_Diplomes_2013']
+    print(f"Fusion terminée. {len(final_df)} communes trouvées dans toutes les bases de données.")
     
-    # RAPPEL MÉTHODOLOGIQUE IMPORTANT
-    # On ne calcule PAS le 'Delta_Revenu' à cause des problèmes de fiabilité
-    # sur Filosofi 2019 : sous estimation massive des revenus (non-prise en compte de la PEPA prime exceptionnelle, défiscalisation des heures supp, etc.). Insee: "le revenu médian semble stagner -0.2% alors qu'il a en réalité augmenter +2.6%"
-    # On garde les variables 'Revenu_Median_2019' et 'Revenu_Median_2013' 
-    # pour les analyser en tant que "Stock", ça reste correct, mais le flux serait sous estimé
-
-    # --- ÉTAPE 4 : VÉRIFICATION FINALE ET SAUVEGARDE ---
-    print("Vérification des données manquantes (NaN) avant sauvegarde...")
-    print(master_df.isnull().sum())
+    print("Calcul des variables (Deltas)...")
+    final_df['Delta_Part_Cadres'] = final_df['Part_Cadres_2020'] - final_df['Part_Cadres_2014']
+    final_df['Delta_Part_Diplomes'] = final_df['Part_Diplomes_2020'] - final_df['Part_Diplomes_2014']
+    final_df['Delta_Vote_Gauche_Verts'] = final_df['Vote_Share_2020'] - final_df['Vote_Share_2014']
+    final_df.replace([np.inf, -np.inf], np.nan, inplace=True)
     
-    master_df_final = master_df.dropna()
-    print(f"Taille finale après suppression des lignes avec NaN: {len(master_df_final)}")
-
-    output_path = 'master_data.csv'
-    master_df_final.to_csv(output_path, index=False)
+    pop_filter = 3500
+    final_df_filtered = final_df[final_df[VAR_POP_2020] > pop_filter].copy()
     
-    print("--- Pipeline terminé ! ---")
-    print(f"Le fichier final '{output_path}' est prêt pour l'analyse.")
-    print(f"Il contient {len(master_df_final)} communes et {len(master_df_final.columns)} variables.")
-    print(master_df_final.head())
-
-
-# ---  EXÉCUTION DU SCRIPT ---
-# lancer le script depuis le terminal avec "python prepare_data.py"
-# ==========================================================
+    print(f"{len(final_df) - len(final_df_filtered)} communes filtrées (pop <= {pop_filter}).")
+    print(f"{len(final_df_filtered)} communes restantes pour l'analyse.")
+    
+    final_columns = [
+        JOIN_KEY,
+        'Delta_Vote_Gauche_Verts',  # Y
+        'Delta_Part_Cadres',        # X1
+        'Delta_Part_Diplomes',      # X2
+        'Revenu_Median_2019',       # X3 (Stock)
+        'Vote_Share_2014', 'Vote_Share_2020',
+        'Part_Cadres_2014', 'Part_Cadres_2020',
+        'Part_Diplomes_2014', 'Part_Diplomes_2020',
+        VAR_POP_2014, VAR_POP_2020
+    ]
+    final_columns = [col for col in final_columns if col in final_df_filtered.columns]
+    final_df_to_save = final_df_filtered[final_columns]
+    
+    output_path = "base_analyse_gentrification_elections.csv"
+    
+    try:
+        final_df_to_save.to_csv(output_path, index=False, sep=';', encoding='utf-8-sig')
+        print("\n--- SUCCÈS ---")
+        print(f"Le fichier final a été sauvegardé sous : {output_path}")
+        print("\nAperçu des données finales :")
+        print(final_df_to_save.head())
+        print("\nDescription des variables (NaNs, etc.) :")
+        print(final_df_to_save.describe(include='all'))
+        
+    except Exception as e:
+        print(f"\n--- ERREUR LORS DE LA SAUVEGARDE ---")
+        print(f"Impossible de sauvegarder le fichier CSV. Erreur: {e}")
 
 if __name__ == "__main__":
     main()
