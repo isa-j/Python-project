@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # Fichiers de données à ignorer
-*.csv
+#*.csv
 *.xlsx
 *.xls
 data/
