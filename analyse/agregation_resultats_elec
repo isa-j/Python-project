@@ -24,15 +24,12 @@ BLOC_GAUCHE_2014 = [
 ]
 
 # Variable Y (Cible) : Pôle "Gauche et Écologistes" 2020
-# !! MODIFICATION V8: Élargissement du bloc 2020 pour inclure LUG et LDVG !!
-#    afin d'obtenir un nombre suffisant d'observations non nulles.
 BLOC_GAUCHE_ECOLO_2020 = [
     'LVECE', # Europe Ecologie-Les Verts
     'LECO',  # Ecologiste
     'LUG',   # Union de la Gauche
     'LDVG'   # Divers Gauche
 ]
-# J'ai renommé la variable en BLOC_GAUCHE_ECOLO_2020 pour plus de clarté
 
 # --- 3. HYPOTHÈSES SUR LES COLONNES (À MODIFIER SI KEYERROR) ---
 
@@ -44,9 +41,11 @@ COLS_2020 = {
     'exp': 'Exprimés'
 }
 
+# !! MODIFICATION V10: Ajout de l'index 0 (Tour) !!
 COLS_2014 = {
-    'usecols': [1, 2, 4, 7, 11, 12], 
-    'names': ['DEP', 'COM_simple', 'Bureau', 'Exprimes', 'Nuance', 'Voix']
+    # Indices 0-based: 0=Tour, 1=DEP, 2=COM_simple, 4=Bureau, 7=Exprimes, 11=Nuance, 12=Voix
+    'usecols': [0, 1, 2, 4, 7, 11, 12], 
+    'names': ['Tour', 'DEP', 'COM_simple', 'Bureau', 'Exprimes', 'Nuance', 'Voix']
 }
 
 
@@ -96,7 +95,6 @@ def process_elec_2020(path, col_map, nuance_list):
         Exprim_Total=(col_map['exp'], 'first') 
     )
     
-    # !! MODIFICATION V8: Renommage de la variable de score !!
     df_agg['Score_Gauche_Ecolo_2020'] = (
         df_agg['Voix_Bloc'] / df_agg['Exprim_Total'].replace(0, np.nan)
     ) * 100
@@ -109,8 +107,9 @@ def process_elec_2020(path, col_map, nuance_list):
 
 def process_elec_2014(path, col_map, nuance_list):
     """
-    Charge et traite le fichier TXT 2014.
+    Charge et traite le fichier TXT 2014 par bureau de vote.
     Reconstruit la clé COM à 5 chiffres.
+    CORRIGE LE BUG DE CALCUL DES EXPRIMÉS (V9) ET LE BUG T1/T2 (V10).
     """
     print(f"Traitement de {path}...")
     try:
@@ -121,14 +120,25 @@ def process_elec_2014(path, col_map, nuance_list):
             header=None,
             usecols=col_map['usecols'],
             names=col_map['names'],
-            dtype={'DEP': str, 'COM_simple': str, 'Bureau': str}
+            dtype={'DEP': str, 'COM_simple': str, 'Bureau': str, 'Tour': str}
         )
     except FileNotFoundError:
         print(f"ERREUR FATALE: Fichier introuvable {path}"); sys.exit()
     except Exception as e:
         print(f"ERREUR lors de la lecture de {path}: {e}"); sys.exit()
 
-    print("Harmonisation de la clé COM pour 2014...")
+    # --- DÉBUT DE LA MODIFICATION V10 ---
+    # Garder UNIQUEMENT les données du premier tour
+    df['Tour'] = pd.to_numeric(df['Tour'], errors='coerce')
+    df = df[df['Tour'] == 1].copy()
+    
+    if df.empty:
+        print("ERREUR FATALE: Le filtrage du Tour 1 n'a retourné aucune donnée.")
+        print("Vérifiez la colonne 'Tour' (index 0) dans le .txt.")
+        sys.exit()
+    # --- FIN DE LA MODIFICATION V10 ---
+
+    print("Harmonisation de la clé COM pour 2014 (Tour 1)...")
     df['DEP_harmonise'] = df['DEP'].astype(str).str.zfill(2)
     df['COM_simple_harmonise'] = df['COM_simple'].astype(str).str.zfill(3)
     df['COM'] = df['DEP_harmonise'] + df['COM_simple_harmonise']
@@ -136,16 +146,21 @@ def process_elec_2014(path, col_map, nuance_list):
     df['Voix'] = pd.to_numeric(df['Voix'], errors='coerce').fillna(0)
     df['Exprimes'] = pd.to_numeric(df['Exprimes'], errors='coerce').fillna(0)
 
-    print("Agrégation des scores 2014 par commune...")
+    print("Agrégation des scores 2014 par commune (Logique V9 Corrigée)...")
     
+    # 1. Obtenir les Exprimés UNIQUES par bureau de vote (Logique V9)
     df_exp_par_bureau = df[['COM', 'Bureau', 'Exprimes']].drop_duplicates()
+    
+    # 2. Sommer les Exprimés de TOUS les bureaux d'une commune
     df_exp_total = df_exp_par_bureau.groupby('COM')['Exprimes'].sum().reset_index()
     df_exp_total = df_exp_total.rename(columns={'Exprimes': 'Exprim_Total'})
 
+    # 3. Calculer les Voix du Bloc (sur T1 uniquement)
     df_bloc = df[df['Nuance'].isin(nuance_list)]
     df_voix_bloc = df_bloc.groupby('COM')['Voix'].sum().reset_index()
     df_voix_bloc = df_voix_bloc.rename(columns={'Voix': 'Voix_Bloc'})
     
+    # 4. Fusionner les deux et calculer le score
     df_agg = pd.merge(df_exp_total, df_voix_bloc, on='COM', how='left')
     df_agg['Voix_Bloc'] = df_agg['Voix_Bloc'].fillna(0)
     
@@ -160,7 +175,7 @@ def process_elec_2014(path, col_map, nuance_list):
 # --- 5. FONCTION PRINCIPALE (PIPELINE) ---
 
 def main():
-    print("--- DÉBUT DU SCRIPT D'AJOUT DES DONNÉES ÉLECTORALES (V8) ---")
+    print("--- DÉBUT DU SCRIPT D'AJOUT DES DONNÉES ÉLECTORALES (V10 - Filtre T1) ---")
     
     # Étape 1: Charger les régresseurs X
     print(f"Chargement des régresseurs X depuis {INPUT_X_FILE}...")
@@ -180,7 +195,6 @@ def main():
     print(f"-> Fichier X chargé et harmonisé: {df_model.shape[0]} communes.")
 
     # Étape 2: Traiter les données électorales
-    # !! MODIFICATION V8: Utilisation de la nouvelle liste de nuances !!
     df_y_2020 = process_elec_2020(
         PATH_ELEC_2020, 
         COLS_2020, 
