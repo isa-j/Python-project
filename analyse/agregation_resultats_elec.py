@@ -1,0 +1,261 @@
+import pandas as pd
+import sys
+import numpy as np
+
+
+
+# Fichier X (nos régresseurs) 
+INPUT_X_FILE = '/Users/romain/Desktop/Projets DS/Python-project/analyse/data/data_pour_reglin.csv'
+
+
+# Fichiers Y (données électorales tour 1)
+PATH_ELEC_2020 = '/Users/romain/Desktop/Projets DS/Python-project/analyse/data/elections_2020.xlsx'
+PATH_ELEC_2014 = '/Users/romain/Desktop/Projets DS/Python-project/analyse/data/elections_2014.txt'
+
+# Fichier de sortie final, prêt pour la régression
+OUTPUT_FINAL_FILE = 'data_deltas_pour_regression.csv'
+
+
+
+# Variable X (Contrôle) : Toute la gauche "historique" de 2014
+BLOC_GAUCHE_2014 = [
+    'LEXG', 'LFG', 'LCOM', 'LPG', 'LSOC', 
+    'LVEC', 'LRDG', 'LDVG', 'LUG'
+]
+
+# Variable Y (Cible) : Pôle "Gauche et Écologistes" 2020
+BLOC_GAUCHE_ECOLO_2020 = [
+    'LVECE', # Europe Ecologie-Les Verts
+    'LECO',  # Ecologiste
+    'LUG',   # Union de la Gauche
+    'LDVG'   # Divers Gauche
+]
+
+# Dictionnaire des colonnes
+
+COLS_2020 = {
+    'dep': 'Code du département',
+    'com_simple': 'Code de la commune',
+    'nuance': 'Code Nuance',
+    'voix': 'Voix',
+    'exp': 'Exprimés'
+}
+
+# index 0: pour prendre tour 1 unqiuement
+COLS_2014 = {
+    # Indices 0-based: 0=Tour, 1=DEP, 2=COM_simple, 4=Bureau, 7=Exprimes, 11=Nuance, 12=Voix
+    'usecols': [0, 1, 2, 4, 7, 11, 12], 
+    'names': ['Tour', 'DEP', 'COM_simple', 'Bureau', 'Exprimes', 'Nuance', 'Voix']
+}
+
+
+
+
+def process_elec_2020(path, col_map, nuance_list):
+    
+    # Charge et traite le fichier Excel 2020.
+    # Reconstruit la clé COM à 5 chiffres.
+    
+    print(f"Traitement de {path}...")
+    try:
+        df = pd.read_excel(path, dtype={
+            col_map['dep']: str, 
+            col_map['com_simple']: str
+        })
+    except FileNotFoundError:
+        print(f"ERREUR FATALE: Fichier introuvable {path}"); sys.exit()
+    except Exception as e:
+        print(f"ERREUR lors de la lecture de {path}: {e}"); sys.exit()
+
+    required_cols = list(col_map.values())
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        print(f"ERREUR FATALE: Colonnes manquantes dans {path}: {missing_cols}")
+        print("Veuillez corriger le dictionnaire COLS_2020.")
+        sys.exit()
+        
+    print("Harmonisation de la clé COM pour 2020...")
+    df['DEP_harmonise'] = df[col_map['dep']].astype(str).str.zfill(2)
+    df['COM_simple_harmonise'] = df[col_map['com_simple']].astype(str).str.zfill(3)
+    df['COM'] = df['DEP_harmonise'] + df['COM_simple_harmonise']
+        
+    df[col_map['voix']] = pd.to_numeric(df[col_map['voix']], errors='coerce').fillna(0)
+    df[col_map['exp']] = pd.to_numeric(df[col_map['exp']], errors='coerce').fillna(0)
+
+    df['voix_bloc'] = df.apply(
+        lambda row: row[col_map['voix']] if row[col_map['nuance']] in nuance_list else 0,
+        axis=1
+    )
+    
+    print("Agrégation des scores 2020 par commune...")
+    grouped = df.groupby('COM')
+    
+    df_agg = grouped.agg(
+        Voix_Bloc=('voix_bloc', 'sum'),
+        Exprim_Total=(col_map['exp'], 'first') 
+    )
+    
+    df_agg['Score_Gauche_Ecolo_2020'] = (
+        df_agg['Voix_Bloc'] / df_agg['Exprim_Total'].replace(0, np.nan)
+    ) * 100
+    
+    df_agg = df_agg.reset_index()
+    
+    print(f"-> Traitement de {path} terminé.")
+    return df_agg[['COM', 'Score_Gauche_Ecolo_2020']]
+
+
+def process_elec_2014(path, col_map, nuance_list):
+    
+    # Charge et traite le fichier TXT 2014 par bureau de vote.
+    # Reconstruit la clé COM à 5 chiffres (excel mangeait des zéros)
+    
+    
+    print(f"Traitement de {path}...")
+    try:
+        df = pd.read_csv(
+            path,
+            sep=';',
+            encoding='latin1',
+            header=None,
+            usecols=col_map['usecols'],
+            names=col_map['names'],
+            dtype={'DEP': str, 'COM_simple': str, 'Bureau': str, 'Tour': str}
+        )
+    except FileNotFoundError:
+        print(f"ERREUR FATALE: Fichier introuvable {path}"); sys.exit()
+    except Exception as e:
+        print(f"ERREUR lors de la lecture de {path}: {e}"); sys.exit()
+
+    
+    # Garder UNIQUEMENT les données du premier tour
+    df['Tour'] = pd.to_numeric(df['Tour'], errors='coerce')
+    df = df[df['Tour'] == 1].copy()
+    
+    if df.empty:
+        print("ERREUR FATALE: Le filtrage du Tour 1 n'a retourné aucune donnée.")
+        print("Vérifiez la colonne 'Tour' (index 0) dans le .txt.")
+        sys.exit()
+    
+
+    print("Harmonisation de la clé COM pour 2014 (Tour 1)...")
+    df['DEP_harmonise'] = df['DEP'].astype(str).str.zfill(2)
+    df['COM_simple_harmonise'] = df['COM_simple'].astype(str).str.zfill(3)
+    df['COM'] = df['DEP_harmonise'] + df['COM_simple_harmonise']
+        
+    df['Voix'] = pd.to_numeric(df['Voix'], errors='coerce').fillna(0)
+    df['Exprimes'] = pd.to_numeric(df['Exprimes'], errors='coerce').fillna(0)
+
+    print("Agrégation des scores 2014 par commune (Logique V9 Corrigée)...")
+    
+    # 1. Obtenir les Exprimés UNIQUES par bureau de vote 
+    df_exp_par_bureau = df[['COM', 'Bureau', 'Exprimes']].drop_duplicates()
+    
+    # 2. Sommer les Exprimés de TOUS les bureaux d'une commune
+    df_exp_total = df_exp_par_bureau.groupby('COM')['Exprimes'].sum().reset_index()
+    df_exp_total = df_exp_total.rename(columns={'Exprimes': 'Exprim_Total'})
+
+    # 3. Calculer les Voix du Bloc (sur T1 uniquement)
+    df_bloc = df[df['Nuance'].isin(nuance_list)]
+    df_voix_bloc = df_bloc.groupby('COM')['Voix'].sum().reset_index()
+    df_voix_bloc = df_voix_bloc.rename(columns={'Voix': 'Voix_Bloc'})
+    
+    # 4. Fusionner les deux et calculer le score
+    df_agg = pd.merge(df_exp_total, df_voix_bloc, on='COM', how='left')
+    df_agg['Voix_Bloc'] = df_agg['Voix_Bloc'].fillna(0)
+    
+    df_agg['Score_Bloc_Gauche_2014'] = (
+        df_agg['Voix_Bloc'] / df_agg['Exprim_Total'].replace(0, np.nan)
+    ) * 100
+    
+    print(f"-> Traitement de {path} terminé.")
+    return df_agg[['COM', 'Score_Bloc_Gauche_2014']]
+
+
+# pipeline
+
+def main():
+    print("DÉBUT DU SCRIPT D'AJOUT DES DONNÉES ÉLECTORALES")
+    
+    # Étape 1: Charger les régresseurs X
+    print(f"Chargement des régresseurs X depuis {INPUT_X_FILE}...")
+    try:
+        df_model = pd.read_csv(
+            INPUT_X_FILE, 
+            sep=';', 
+            decimal=',', 
+            dtype={'COM': str}
+        )
+    except FileNotFoundError:
+        print(f"ERREUR FATALE: Fichier '{INPUT_X_FILE}' introuvable.")
+        print("Veuillez d'abord exécuter le script 'clean_and_transform_data.py'.")
+        sys.exit()
+        
+    df_model['COM'] = df_model['COM'].astype(str).str.zfill(5)
+    print(f"-> Fichier X chargé et harmonisé: {df_model.shape[0]} communes.")
+
+    # Étape 2: Traiter les données électorales
+    df_y_2020 = process_elec_2020(
+        PATH_ELEC_2020, 
+        COLS_2020, 
+        BLOC_GAUCHE_ECOLO_2020 
+    )
+    
+    df_x_2014 = process_elec_2014(
+        PATH_ELEC_2014, 
+        COLS_2014, 
+        BLOC_GAUCHE_2014
+    )
+
+    # Étape 3: Fusionner Y et X_contrôle avec les régresseurs
+    print("\nFusion des données électorales avec les régresseurs...")
+    
+    print(f"Clés 2020 (aperçu): {df_y_2020['COM'].head().tolist()}")
+    print(f"Clés 2014 (aperçu): {df_x_2014['COM'].head().tolist()}")
+    print(f"Clés Régresseurs (aperçu): {df_model['COM'].head().tolist()}")
+    
+    df_final = pd.merge(
+        df_model, 
+        df_y_2020, 
+        on='COM', 
+        how='inner' 
+    )
+    print(f"-> Après fusion Y (2020): {df_final.shape[0]} communes restantes.")
+    
+    df_final = pd.merge(
+        df_final, 
+        df_x_2014, 
+        on='COM', 
+        how='inner' 
+    )
+    print(f"-> Après fusion X (2014): {df_final.shape[0]} communes restantes.")
+
+    # Étape 4: Nettoyage final
+    nb_avant = len(df_final)
+    df_final = df_final.dropna()
+    nb_apres = len(df_final)
+    print(f"Nettoyage final des NaN: {nb_avant - nb_apres} lignes supprimées.")
+
+    if df_final.empty:
+        print("ERREUR FATALE: Le DataFrame final est vide après fusion.")
+        sys.exit()
+
+    # Étape 5: Sauvegarde
+    df_final.to_csv(
+        OUTPUT_FINAL_FILE, 
+        index=False, 
+        sep=';', 
+        decimal=','
+    )
+    
+    print(f"\n--- PIPELINE TERMINÉ ---")
+    print(f"Le fichier '{OUTPUT_FINAL_FILE}' est prêt pour l'analyse.")
+    print(f"Taille finale: {df_final.shape[0]} communes, {df_final.shape[1]} variables.")
+    print("\nAperçu des données finales:")
+    print(df_final.head())
+    print("\nVariables prêtes pour la régression:")
+    print(df_final.columns.tolist())
+
+# exécution du script
+if __name__ == "__main__":
+    main()
