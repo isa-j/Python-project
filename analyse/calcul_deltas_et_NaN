@@ -1,0 +1,109 @@
+import pandas as pd
+import numpy as np #
+import sys
+
+# on va gérer les NaN et les inf (transforme les inf en NaN, puis solution radicale dropna() ) et calculer les deltas
+# cause des NaN et inf: secret statistique, divisions par zéro..
+
+# --- 1. PARAMÈTRES ---
+
+INPUT_FILE = 'master_data_fusionne.csv'
+OUTPUT_FILE = 'master_data_pret_pour_analyse.csv'
+
+# Colonnes à garder pour l'analyse finale (nos variables 'X')
+# On y ajoute la variable Y (le score électoral) plus tard
+FINAL_COLS = [
+    'COM',
+    'P20_POP',           # Population 2020 (comme variable de contrôle)
+    'Delta_Cadres',      # Notre variable "choc" #1
+    'Delta_Diplomes',    # Notre variable "choc" #2
+    'MED19',             # Revenu 2019 (variable de "stock")
+    'MED13'              # Revenu 2013 (variable de "stock")
+]
+
+# --- 2. FONCTION PRINCIPALE ---
+
+def clean_and_transform(input_path, output_path):
+    print(f"--- DÉBUT DU NETTOYAGE ET DE LA TRANSFORMATION ---")
+    
+    # Étape 1: Charger le fichier fusionné
+    print(f"Chargement de {input_path}...")
+    try:
+        # On lit le fichier en spécifiant les formats de la sauvegarde précédente
+        df = pd.read_csv(
+            input_path, 
+            sep=';', 
+            decimal=',',
+            dtype={'COM': str} # Garder le code COM en string
+        )
+    except FileNotFoundError:
+        print(f"ERREUR FATALE: Fichier '{input_path}' introuvable.")
+        print("Vérifiez que le script V3 a bien fonctionné.")
+        sys.exit()
+    except Exception as e:
+        print(f"ERREUR inattendue lors de la lecture: {e}")
+        sys.exit()
+
+    print(f"Fichier chargé. {df.shape[0]} lignes et {df.shape[1]} colonnes.")
+
+    # Étape 2: Calculer les variables "Delta"
+    print("Calcul des variables 'Delta'...")
+    # Delta en points de pourcentage (ex: 25% - 20% = 5 points)
+    df['Delta_Cadres'] = df['ratio_cadres_20'] - df['ratio_cadres_14']
+    df['Delta_Diplomes'] = df['ratio_sup_20'] - df['ratio_sup_14']
+    
+    # (Rappel: on ne calcule pas de delta pour le revenu: à cause de la crise des gilets jaunes, l'INSEE prévient qu'elle a 
+    # sous estimé le revenu total (pas prise en compte de défiscalsiation des heures supp, prime exceptionnelles,... etc.)
+
+    # Étape 3: Sélectionner les colonnes finales pour l'analyse
+    print("Sélection des colonnes pour l'analyse...")
+    # S'assurer que toutes les colonnes nécessaires existent
+    try:
+        df_model = df[FINAL_COLS]
+    except KeyError as e:
+        print(f"ERREUR: Une colonne manque dans le fichier fusionné: {e}")
+        print("Vérifiez les noms dans la liste FINAL_COLS.")
+        sys.exit()
+
+    # Étape 4: Gérer les NaN et infinis
+    print("Inspection des données manquantes (NaN) et infinies (inf)...")
+    
+    # Remplacer les 'inf' (créés par division par zéro) par des NaN
+    # C'est crucial car dropna() ne supprime pas les 'inf' par défaut
+    df_clean = df_model.replace([np.inf, -np.inf], np.nan)
+
+    # Afficher le bilan des NaN AVANT suppression
+    print("\nBilan des NaN AVANT suppression:")
+    print(df_clean.isnull().sum())
+    
+    nb_lignes_avant = len(df_clean)
+    print(f"\nNombre de communes avant nettoyage: {nb_lignes_avant}")
+
+    # Supprimer TOUTES les lignes où il manque AU MOINS UNE donnée
+    df_clean = df_clean.dropna()
+    
+    nb_lignes_apres = len(df_clean)
+    print(f"Nombre de communes après nettoyage: {nb_lignes_apres}")
+    print(f"-> {nb_lignes_avant - nb_lignes_apres} communes (lignes) supprimées.")
+
+    if df_clean.empty:
+        print("ATTENTION: Le DataFrame est vide après nettoyage. Aucun commune n'avait de données complètes.")
+        sys.exit()
+
+    # Étape 5: Sauvegarder le fichier final prêt pour l'analyse
+    print(f"\nSauvegarde du fichier nettoyé dans '{output_path}'...")
+    df_clean.to_csv(
+        output_path, 
+        index=False, 
+        sep=';', 
+        decimal=','
+    )
+    
+    print(f"--- TERMINÉ ---")
+    print(f"Le fichier est prêt pour l'analyse.")
+    print("\nAperçu des données nettoyées:")
+    print(df_clean.head())
+
+# --- 3. EXÉCUTION ---
+if __name__ == "__main__":
+    clean_and_transform(INPUT_FILE, OUTPUT_FILE)
