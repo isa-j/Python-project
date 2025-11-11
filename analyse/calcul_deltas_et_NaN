@@ -5,7 +5,7 @@ import sys
 # on va gérer les NaN et les inf (transforme les inf en NaN, puis solution radicale dropna() ) et calculer les deltas
 # cause des NaN et inf: secret statistique, divisions par zéro..
 
-# --- 1. PARAMÈTRES ---
+# PARAMETRES
 
 INPUT_FILE = 'master_data_fusionne.csv'
 OUTPUT_FILE = 'master_data_pret_pour_analyse.csv'
@@ -21,7 +21,7 @@ FINAL_COLS = [
     'MED13'              # Revenu 2013 (variable de "stock")
 ]
 
-# --- 2. FONCTION PRINCIPALE ---
+
 
 def clean_and_transform(input_path, output_path):
     print(f"--- DÉBUT DU NETTOYAGE ET DE LA TRANSFORMATION ---")

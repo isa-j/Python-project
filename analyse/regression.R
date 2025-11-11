@@ -26,12 +26,11 @@ cat("Resultats MCO")
 
 
 # On explique Y (Score 2020) par les Deltas (X), les Stocks (X) et le Vote passé (X)
-formula <- Score_Gauche_Ecolo_2020 ~ Delta_Cadres + 
-  Delta_Diplomes + 
-  MED19 + 
-  MED13 + 
-  P20_POP + 
-  Score_Bloc_Gauche_2014
+formula_v2 <- Score_Gauche_Ecolo_2020 ~ Delta_Cadres + 
+                                       Delta_Diplomes + 
+                                       MED13 +  # On garde que 2013 pour éviter la multicollinéarité
+                                       log(P20_POP) + # On log-transforme la population
+                                       Score_Bloc_Gauche_2014
 
 
 model <- lm(formula, data = df)

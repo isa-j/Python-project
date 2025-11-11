@@ -2,20 +2,20 @@ import pandas as pd
 import sys
 import numpy as np
 
-# --- 1. PARAMÈTRES PRINCIPAUX ---
 
-# Fichier X (nos régresseurs) créé par le script précédent
+
+# Fichier X (nos régresseurs) 
 INPUT_X_FILE = '/Users/romain/Desktop/Projets DS/Python-project/analyse/data/data_pour_reglin.csv'
 
 
-# Fichiers Y (données électorales brutes)
+# Fichiers Y (données électorales tour 1)
 PATH_ELEC_2020 = '/Users/romain/Desktop/Projets DS/Python-project/analyse/data/elections_2020.xlsx'
 PATH_ELEC_2014 = '/Users/romain/Desktop/Projets DS/Python-project/analyse/data/elections_2014.txt'
 
 # Fichier de sortie final, prêt pour la régression
 OUTPUT_FINAL_FILE = 'model_ready_data_bloc_vert_elargi.csv'
 
-# --- 2. PARAMÈTRES D'AGRÉGATION (NOTRE STRATÉGIE) ---
+
 
 # Variable X (Contrôle) : Toute la gauche "historique" de 2014
 BLOC_GAUCHE_2014 = [
@@ -31,7 +31,7 @@ BLOC_GAUCHE_ECOLO_2020 = [
     'LDVG'   # Divers Gauche
 ]
 
-# --- 3. HYPOTHÈSES SUR LES COLONNES (À MODIFIER SI KEYERROR) ---
+# Dictionnaire des colonnes
 
 COLS_2020 = {
     'dep': 'Code du département',
@@ -41,7 +41,7 @@ COLS_2020 = {
     'exp': 'Exprimés'
 }
 
-# !! MODIFICATION V10: Ajout de l'index 0 (Tour) !!
+# index 0: pour prendre tour 1 unqiuement
 COLS_2014 = {
     # Indices 0-based: 0=Tour, 1=DEP, 2=COM_simple, 4=Bureau, 7=Exprimes, 11=Nuance, 12=Voix
     'usecols': [0, 1, 2, 4, 7, 11, 12], 
@@ -49,13 +49,13 @@ COLS_2014 = {
 }
 
 
-# --- 4. FONCTIONS DE TRAITEMENT ÉLECTORAL ---
+
 
 def process_elec_2020(path, col_map, nuance_list):
-    """
-    Charge et traite le fichier Excel 2020.
-    Reconstruit la clé COM à 5 chiffres.
-    """
+    
+    # Charge et traite le fichier Excel 2020.
+    # Reconstruit la clé COM à 5 chiffres.
+    
     print(f"Traitement de {path}...")
     try:
         df = pd.read_excel(path, dtype={
@@ -106,11 +106,11 @@ def process_elec_2020(path, col_map, nuance_list):
 
 
 def process_elec_2014(path, col_map, nuance_list):
-    """
-    Charge et traite le fichier TXT 2014 par bureau de vote.
-    Reconstruit la clé COM à 5 chiffres.
-    CORRIGE LE BUG DE CALCUL DES EXPRIMÉS (V9) ET LE BUG T1/T2 (V10).
-    """
+    
+    # Charge et traite le fichier TXT 2014 par bureau de vote.
+    # Reconstruit la clé COM à 5 chiffres (excel mangeait des zéros)
+    
+    
     print(f"Traitement de {path}...")
     try:
         df = pd.read_csv(
@@ -127,7 +127,7 @@ def process_elec_2014(path, col_map, nuance_list):
     except Exception as e:
         print(f"ERREUR lors de la lecture de {path}: {e}"); sys.exit()
 
-    # --- DÉBUT DE LA MODIFICATION V10 ---
+    
     # Garder UNIQUEMENT les données du premier tour
     df['Tour'] = pd.to_numeric(df['Tour'], errors='coerce')
     df = df[df['Tour'] == 1].copy()
@@ -136,7 +136,7 @@ def process_elec_2014(path, col_map, nuance_list):
         print("ERREUR FATALE: Le filtrage du Tour 1 n'a retourné aucune donnée.")
         print("Vérifiez la colonne 'Tour' (index 0) dans le .txt.")
         sys.exit()
-    # --- FIN DE LA MODIFICATION V10 ---
+    
 
     print("Harmonisation de la clé COM pour 2014 (Tour 1)...")
     df['DEP_harmonise'] = df['DEP'].astype(str).str.zfill(2)
@@ -148,7 +148,7 @@ def process_elec_2014(path, col_map, nuance_list):
 
     print("Agrégation des scores 2014 par commune (Logique V9 Corrigée)...")
     
-    # 1. Obtenir les Exprimés UNIQUES par bureau de vote (Logique V9)
+    # 1. Obtenir les Exprimés UNIQUES par bureau de vote 
     df_exp_par_bureau = df[['COM', 'Bureau', 'Exprimes']].drop_duplicates()
     
     # 2. Sommer les Exprimés de TOUS les bureaux d'une commune
@@ -172,10 +172,10 @@ def process_elec_2014(path, col_map, nuance_list):
     return df_agg[['COM', 'Score_Bloc_Gauche_2014']]
 
 
-# --- 5. FONCTION PRINCIPALE (PIPELINE) ---
+# pipeline
 
 def main():
-    print("--- DÉBUT DU SCRIPT D'AJOUT DES DONNÉES ÉLECTORALES (V10 - Filtre T1) ---")
+    print("DÉBUT DU SCRIPT D'AJOUT DES DONNÉES ÉLECTORALES")
     
     # Étape 1: Charger les régresseurs X
     print(f"Chargement des régresseurs X depuis {INPUT_X_FILE}...")
@@ -256,6 +256,6 @@ def main():
     print("\nVariables prêtes pour la régression:")
     print(df_final.columns.tolist())
 
-# --- 6. EXÉCUTION ---
+# exécution du script
 if __name__ == "__main__":
     main()
