@@ -30,3 +30,31 @@ model_logit <- glm(basculement_gauche ~ delta_pct_diplome + MED13 + delta_pop,
                    family = "binomial")
 
 summary(model_logit)
+
+
+# 1. Chargement des données
+df <- read.csv("/Users/romain/Desktop/Projets DS/Python-project/analyse/data_pour_regression.csv")
+
+# 2. Régression MCO (Modèle linéaire)
+# Y = delta_score (variable continue)
+# X = croissance_pop + delta_pct_diplome + log_med_13
+modele <- lm(delta_score ~ croissance_pop + delta_pct_diplome + delta_pct_cadres + log_med_13, data = df)
+
+# 3. Affichage des résultats
+summary(modele)
+
+
+
+# Est-ce que les villes diplômées votent Ecolo en 2020 ?
+test_niveau <- lm(score_2020 ~ part_diplome_20 + log_med_13 + score_2014 + part_cadres_14, data = df)
+summary(test_niveau)
+
+
+
+
+
+
+
+
+
+
